@@ -1,0 +1,6 @@
+{
+  "name": "project-sync",
+  "version": "0.1.0",
+  "description": "Nudge to work task-management-first: before acting, check your configured sync channels (a task tracker, project notes, an experiment tracker, ...) for blockers / in-progress work / recent decisions; after state changes, write status and results back. Channels are configurable via TOML (global + per-project). Tool- and project-agnostic.",
+  "author": { "name": "Acture" }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "claude-project-sync",
+  "owner": { "name": "Acture" },
+  "plugins": [
+    {
+      "name": "project-sync",
+      "source": "./plugins/project-sync",
+      "description": "Task-management-first nudge (hook) + per-task sync playbook (skill), with configurable sync channels (e.g. tasks→Linear, experiments→Trackio, notes→Notion)."
+    }
+  ]
+}

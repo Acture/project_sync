@@ -1,0 +1,32 @@
+# project-sync config (example)
+#
+# Copy to one of:
+#   - per-project: <repo>/.project-sync.toml      (overrides + extends global)
+#   - global:      ~/.config/project-sync/config.toml
+#
+# Each [[channel]] maps a sync purpose to a tool and the phase(s) it applies to.
+#   when = ["before"]          -> check this channel before acting
+#   when = ["after"]           -> write back to this channel after changes
+#   when = ["before", "after"] -> both (default if `when` is omitted)
+#
+# `tool` names a *kind* of destination; the agent adapts to whatever MCP exists
+# on the machine, so the exact tool names need not match per-host MCP namespaces.
+#
+# Per-project channels override global channels with the same `purpose`
+# (case-insensitive) and append any new purposes. With no config present, the
+# built-in default is: task plans -> Linear, decisions / notes -> Notion.
+
+[[channel]]
+purpose = "task plans"
+tool = "Linear"
+when = ["before", "after"]
+
+[[channel]]
+purpose = "decisions / notes"
+tool = "Notion"
+when = ["before", "after"]
+
+[[channel]]
+purpose = "experiment results/logs"
+tool = "Trackio"
+when = ["after"]
