@@ -1,12 +1,14 @@
-"""Tests for the configurable project-sync hook logic. Stdlib unittest only."""
+"""Tests for the low-frequency project-sync SessionStart hook."""
 
+import json
 import os
 import sys
 import tempfile
 import unittest
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK_DIR = os.path.join(
-	os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+	REPO_ROOT,
 	"plugins",
 	"project-sync",
 	"hooks",
@@ -16,15 +18,22 @@ sys.path.insert(0, HOOK_DIR)
 import project_sync_prompt as h  # noqa: E402
 
 
+# --- channel config ------------------------------------------------------------
+
+
 class NormalizeChannel(unittest.TestCase):
 	def test_defaults_when_to_before_and_after(self):
 		c = h.normalize_channel({"purpose": "task plans", "tool": "Linear"})
+		if c is None:
+			self.fail("valid channel was rejected")
 		self.assertEqual(c["when"], ["before", "after"])
 
 	def test_preserves_explicit_when(self):
 		c = h.normalize_channel(
 			{"purpose": "logs", "tool": "Trackio", "when": ["after"]}
 		)
+		if c is None:
+			self.fail("valid channel was rejected")
 		self.assertEqual(c["when"], ["after"])
 
 	def test_rejects_channel_missing_purpose_or_tool(self):
@@ -57,41 +66,6 @@ class MergeChannels(unittest.TestCase):
 		self.assertEqual(merged[0]["tool"], "Asana")
 
 
-class BuildReminder(unittest.TestCase):
-	def test_default_no_state_lists_before_channels(self):
-		text = h.build_reminder(h.DEFAULT_CHANNELS, [])
-		self.assertIn("before acting", text)
-		self.assertIn("Linear", text)
-		self.assertIn("Notion", text)
-		self.assertNotIn("⚠", text)  # no warning sign without state change
-
-	def test_state_change_adds_sync_back_augment(self):
-		text = h.build_reminder(h.DEFAULT_CHANNELS, ['"Edit"', "git commit"])
-		self.assertIn("⚠", text)
-		self.assertIn("git commit", text)
-		self.assertIn("Linear", text)
-
-	def test_respects_when_phase(self):
-		channels = [
-			{"purpose": "task plans", "tool": "Linear", "when": ["before"]},
-			{"purpose": "experiment logs", "tool": "Trackio", "when": ["after"]},
-		]
-		base = h.build_reminder(channels, [])
-		self.assertIn("Linear", base)
-		self.assertNotIn("Trackio", base)  # after-only stays out of the before nudge
-		augmented = h.build_reminder(channels, ['"Write"'])
-		self.assertIn("Trackio", augmented)
-
-
-class DetectState(unittest.TestCase):
-	def test_returns_sorted_unique_hits(self):
-		tail = 'noise "Edit" noise git commit noise "Edit"'
-		hits = h.detect_state(tail, h.STATE_SIGNALS)
-		self.assertIn('"Edit"', hits)
-		self.assertIn("git commit", hits)
-		self.assertEqual(hits, sorted(set(hits)))
-
-
 class FindConfigFile(unittest.TestCase):
 	def test_walks_up_to_find_file(self):
 		with tempfile.TemporaryDirectory() as top:
@@ -101,7 +75,8 @@ class FindConfigFile(unittest.TestCase):
 			with open(target, "w") as f:
 				f.write("")
 			found = h.find_config_file(child, ".project-sync.toml")
-			self.assertIsNotNone(found)
+			if found is None:
+				self.fail("project config was not found")
 			self.assertTrue(os.path.samefile(found, target))
 
 	def test_returns_none_when_absent(self):
@@ -114,6 +89,13 @@ class ResolveChannels(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
 			channels = h.resolve_channels(cwd=cwd, home=home, env={})
 			self.assertEqual(channels, h.DEFAULT_CHANNELS)
+
+	def test_returns_independent_copies_of_defaults(self):
+		# Mutating a returned channel must not corrupt the module-level constant.
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			channels = h.resolve_channels(cwd=cwd, home=home, env={})
+			channels[0]["tool"] = "MUTATED"
+			self.assertNotEqual(h.DEFAULT_CHANNELS[0]["tool"], "MUTATED")
 
 	def test_project_overrides_and_extends_global(self):
 		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
@@ -138,6 +120,55 @@ class ResolveChannels(unittest.TestCase):
 			self.assertEqual(by_purpose["task plans"]["tool"], "Asana")
 			self.assertEqual(by_purpose["decisions / notes"]["tool"], "Notion")
 			self.assertEqual(by_purpose["experiment results/logs"]["tool"], "Trackio")
+
+
+# --- text builders -------------------------------------------------------------
+
+
+class BuildSessionText(unittest.TestCase):
+	def test_lists_before_and_after_channels(self):
+		text = h.build_session_text(h.DEFAULT_CHANNELS)
+		self.assertIn("before acting", text.lower())
+		self.assertIn("Before finishing", text)
+		self.assertIn("Linear", text)
+		self.assertIn("Notion", text)
+
+	def test_respects_channel_phases(self):
+		channels = [
+			{"purpose": "task plans", "tool": "Linear", "when": ["before"]},
+			{"purpose": "experiment logs", "tool": "Trackio", "when": ["after"]},
+		]
+		text = h.build_session_text(channels)
+		before_text, after_text = text.split("Before finishing", maxsplit=1)
+		self.assertIn("Linear", before_text)
+		self.assertNotIn("Trackio", before_text)
+		self.assertIn("experiment logs", after_text)
+		self.assertIn("Trackio", after_text)
+		self.assertNotIn("Linear", after_text)
+
+
+class ShouldEmit(unittest.TestCase):
+	def test_allows_low_frequency_session_sources(self):
+		for source in ("startup", "resume", "clear"):
+			with self.subTest(source=source):
+				self.assertTrue(h.should_emit("SessionStart", source))
+
+	def test_rejects_compact_and_per_prompt_events(self):
+		self.assertFalse(h.should_emit("SessionStart", "compact"))
+		self.assertFalse(h.should_emit("UserPromptSubmit", None))
+
+	def test_rejects_missing_event_or_source(self):
+		self.assertFalse(h.should_emit("SessionStart", None))
+		self.assertFalse(h.should_emit("", "startup"))
+
+
+class HookManifest(unittest.TestCase):
+	def test_registers_only_filtered_session_start(self):
+		path = os.path.join(HOOK_DIR, "hooks.json")
+		with open(path, encoding="utf-8") as f:
+			hooks = json.load(f)["hooks"]
+		self.assertEqual(set(hooks), {"SessionStart"})
+		self.assertEqual(hooks["SessionStart"][0]["matcher"], "startup|resume|clear")
 
 
 if __name__ == "__main__":

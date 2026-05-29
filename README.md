@@ -13,13 +13,18 @@ The plugin ships two complementary pieces:
 
 | Piece | Mechanism | Behavior |
 |-------|-----------|----------|
-| **Hook** (`UserPromptSubmit`) | Fires **automatically** every prompt | Injects a reminder to consult your *sync channels* first; if the previous turn made state changes (edits, commits, issue saves, …), appends a "sync those changes back" nudge. |
-| **Skill** (`project-sync`) | **Model-invoked** when the task matches | The portable reminder core — a before/after playbook the model loads when starting or finishing a unit of work. |
+| **Hook** (`SessionStart`) | Fires on `startup`, `resume`, and `clear`; never on per-prompt events or automatic compaction | Injects one compact session reminder covering both the initial check and eventual write-back. |
+| **Skill** (`project-sync`) | **Model-invoked** when the task matches | The per-task *before/after* playbook — loaded when the model judges it's starting or finishing a unit of work. |
 
-**Why both?** A skill is loaded only when the model judges it relevant; only a
-*plugin* can register a hook that fires unconditionally. The hook is the
-auto-fire path; the skill is the graceful fallback on CLIs where hook
-context-injection isn't honored (see [Cross-CLI support](#cross-cli-support)).
+**Why this split?** Starting and finishing a meaningful unit of work are semantic
+judgments, so the model-invoked skill owns both. The hook only makes that policy
+available once when a session starts or is explicitly reset. There is no
+`UserPromptSubmit` or `Stop` hook, so Project Sync adds no per-turn process or
+repeated reminder.
+
+Only a *plugin* can register always-on hooks; the skill is also the graceful
+fallback on CLIs where hook context-injection isn't honored (see
+[Cross-CLI support](#cross-cli-support)).
 
 ## Sync channels (configuration)
 
@@ -75,15 +80,15 @@ Minimum bar on all three CLIs: the skill is model-invocable.
 
 ## Development
 
-The hook is stdlib-only Python (no dependencies), so plain `python3` runs it on
-macOS / Linux / WSL.
+The hook is stdlib-only Python 3.11+ (no dependencies), so plain `python3`
+runs it on macOS / Linux / WSL.
 
 ```sh
 # Run the test suite
 python3 -m unittest discover -s tests -v
 
-# Smoke-test the hook directly
-echo '{"transcript_path":"/tmp/none"}' | python3 plugins/project-sync/hooks/project_sync_prompt.py
+# Smoke-test the low-frequency SessionStart reminder
+echo '{"hook_event_name":"SessionStart","source":"startup"}' | python3 plugins/project-sync/hooks/project_sync_prompt.py
 ```
 
 ## Layout
@@ -95,8 +100,8 @@ project_sync/
   plugins/project-sync/
     .claude-plugin/plugin.json
     hooks/
-      hooks.json                         # registers the UserPromptSubmit hook
-      project_sync_prompt.py             # stdlib-only, config-driven
+      hooks.json                         # registers filtered SessionStart only
+      project_sync_prompt.py             # stdlib-only, config-driven session reminder
     skills/project-sync/SKILL.md
   tests/test_project_sync_prompt.py
 ```
