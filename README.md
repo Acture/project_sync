@@ -92,7 +92,9 @@ exists on the machine — the hook never hardcodes per-host MCP tool names. See
 
 ## Install
 
-Once this repo is on GitHub (e.g. `Acture/project_sync` — confirm your slug):
+The marketplace repo is [`Acture/project_sync`](https://github.com/Acture/project_sync).
+Registration is always an explicit per-CLI action by the user — nothing in this
+repo enables itself, and no install step touches another CLI's configuration.
 
 | CLI | How to register |
 |-----|-----------------|
@@ -100,26 +102,43 @@ Once this repo is on GitHub (e.g. `Acture/project_sync` — confirm your slug):
 | **Codex** | Edit `~/.codex/config.toml`: add a `[marketplaces.claude-project-sync]` git source and `[plugins."project-sync@claude-project-sync"] enabled = true`. |
 | **Copilot** | Edit `~/.copilot/settings.json`: add `"project-sync@claude-project-sync": true` to `enabledPlugins`. |
 
-For local testing before pushing:
-`claude plugin marketplace add ~/repos/project_sync` (point at this path).
+To try it from a local checkout instead:
+`claude plugin marketplace add /path/to/project_sync`.
 
 ## Cross-CLI support
 
-- **Claude Code** — hook auto-fires *and* skill is model-invocable. ✅ full.
-- **Codex / Copilot** — the hook **runs** (proven cross-CLI), but whether its
-  `additionalContext` injection is honored is **CLI-confirmed only on Claude
-  Code**. On those CLIs, treat the **skill** as the reliable path; the hook is a
-  best-effort bonus.
+Evidence levels used below:
 
-Minimum bar on all three CLIs: the skill is model-invocable.
+- **Process-verified** — the hook was exercised locally as a real subprocess
+  (stdin/stdout/stderr/exit codes) by this repo's test suite. This proves the
+  hook's *process contract only* — never that a host injects the context.
+- **Contract-checked** — confirmed against official docs or upstream source,
+  not yet observed on a running host.
+- **Host-pending** — requires a real host install before any claim.
+
+| CLI | Hook process contract | Host context injection | Skill model-invocable | Evidence today |
+|-----|-----------------------|------------------------|-----------------------|----------------|
+| **Claude Code** | ✅ Process-verified | ✅ Documented; confirmed on Claude Code 2.1.x | ✅ | **Full support** |
+| **Codex** | ✅ Process-verified | Contract-checked: `rust-v0.160.1` `session_start.rs` accepts nested `hookSpecificOutput.additionalContext`; plugin discovery + model-visible injection host-pending | Contract-checked; host-pending | Skill is the reliable path |
+| **Copilot** | ✅ Process-verified | Contract-checked with known deltas: docs consume a *top-level* `additionalContext` (ours is nested) and a `new` source our allowlist rejects; host-pending | Contract-checked; host-pending | Skill is the reliable path |
+| **DSH** (DeepSeek Harness) | — no hook adapter yet | Not promised: upstream `5badb15` inspected; skill reuse via shared `customSkillDirs` roots is contract-checked; runtime not installed locally | Contract-checked; host-pending | Skill reuse only |
+
+A green process-level test on this repo is **not** evidence that any host
+injects `additionalContext` into the model — on every CLI except Claude Code
+the hook is a best-effort bonus. Minimum bar on all four CLIs: the **skill**
+is model-invocable.
 
 ## Development
 
-The hook is stdlib-only Python 3.11+ (no dependencies), so plain `python3`
-runs it on macOS / Linux / WSL.
+The hook is stdlib-only Python 3.11+ (no runtime dependencies), so plain
+`python3` runs it on macOS / Linux / WSL. Quality gates use the pinned
+toolchain in [`requirements-dev.txt`](./requirements-dev.txt):
 
 ```sh
-# Run the test suite
+# One-time setup of the quality toolchain (ruff + ty, pinned)
+python3 -m pip install -r requirements-dev.txt
+
+# Run the test suite (includes process-level hook acceptance tests)
 python3 -m unittest discover -s tests -v
 
 # Smoke-test the low-frequency SessionStart reminder
@@ -142,13 +161,16 @@ ty check .
 ```
 project_sync/
   .claude-plugin/marketplace.json        # marketplace manifest
+  .github/workflows/ci.yml               # unittest + ruff + ty on Python 3.11-3.13
   project-sync.example.toml              # example channel config
-  pyproject.toml                         # ty extra-search-path for the hook module
+  pyproject.toml                         # requires-python, ruff rules, ty search path
+  requirements-dev.txt                   # pinned quality toolchain (ruff, ty)
+  STATUS.md                              # current validation + cross-CLI evidence record
   plugins/project-sync/
     .claude-plugin/plugin.json
     hooks/
       hooks.json                         # registers filtered SessionStart only
       project_sync_prompt.py             # stdlib-only, config-driven session reminder
     skills/project-sync/SKILL.md
-  tests/test_project_sync_prompt.py
+  tests/test_project_sync_prompt.py      # unit + real-subprocess hook acceptance tests
 ```

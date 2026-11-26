@@ -1,2 +1,21 @@
+[project]
+name = "project-sync"
+version = "0.2.0"
+description = "Task-management-first plugin: a low-frequency SessionStart reminder hook plus a per-task sync skill."
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+# E501: ruff format owns line wrapping; long strings/comments are tolerated.
+# W191: the codebase indents with tabs by convention.
+ignore = ["E501", "W191"]
+
+[tool.ruff.format]
+indent-style = "tab"
+
 [tool.ty.environment]
+python-version = "3.11"
 extra-paths = ["plugins/project-sync/hooks"]

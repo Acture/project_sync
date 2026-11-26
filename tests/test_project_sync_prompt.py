@@ -158,14 +158,20 @@ class FindProjectConfigs(unittest.TestCase):
 
 class ResolveChannels(unittest.TestCase):
 	def test_defaults_when_no_config_present(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
 			self.assertEqual(resolution.errors, [])
 			self.assertEqual(resolution.channels, h.DEFAULT_CHANNELS)
 
 	def test_returns_independent_copies_of_defaults(self):
 		# Mutating a returned channel must not corrupt the module-level constant.
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
 			resolution.channels[0]["tool"] = "MUTATED"
 			resolution.channels[0]["when"].append("before")
@@ -173,7 +179,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assertEqual(h.DEFAULT_CHANNELS[0]["when"], ["before", "after"])
 
 	def test_project_overrides_and_extends_global(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			gdir = os.path.join(home, ".config", "project-sync")
 			os.makedirs(gdir)
 			write(
@@ -201,7 +210,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assertEqual(by_purpose["experiment results/logs"]["tool"], "Trackio")
 
 	def test_project_disables_default_channel(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "decisions / notes"\nenabled = false\n',
@@ -214,7 +226,10 @@ class ResolveChannels(unittest.TestCase):
 			)
 
 	def test_project_reenables_globally_disabled_channel(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			gdir = os.path.join(home, ".config", "project-sync")
 			os.makedirs(gdir)
 			write(
@@ -233,7 +248,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assertEqual(by_purpose["decisions / notes"]["when"], ["after"])
 
 	def test_disabling_unknown_purpose_is_a_no_op(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "no such channel"\nenabled = false\n',
@@ -248,13 +266,19 @@ class ResolveChannels(unittest.TestCase):
 		self.assertIn(needle, resolution.errors[0])
 
 	def test_damaged_project_toml_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(os.path.join(cwd, ".project-sync.toml"), "[[channel]\n")
 			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
 			self.assert_fails_closed(resolution, ".project-sync.toml")
 
 	def test_damaged_global_toml_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			gdir = os.path.join(home, ".config", "project-sync")
 			os.makedirs(gdir)
 			write(os.path.join(gdir, "config.toml"), "[[channel]\n")
@@ -262,13 +286,19 @@ class ResolveChannels(unittest.TestCase):
 			self.assert_fails_closed(resolution, "config.toml")
 
 	def test_non_array_channel_key_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(os.path.join(cwd, ".project-sync.toml"), "channel = 1\n")
 			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
 			self.assert_fails_closed(resolution, "[[channel]]")
 
 	def test_single_channel_table_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[channel]\npurpose = "x"\ntool = "y"\n',
@@ -277,7 +307,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assert_fails_closed(resolution, "[[channel]]")
 
 	def test_empty_when_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "x"\ntool = "y"\nwhen = []\n',
@@ -286,7 +319,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assert_fails_closed(resolution, "when")
 
 	def test_non_list_when_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "x"\ntool = "y"\nwhen = "before"\n',
@@ -295,7 +331,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assert_fails_closed(resolution, "when")
 
 	def test_unknown_phase_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "x"\ntool = "y"\nwhen = ["before", "later"]\n',
@@ -304,7 +343,10 @@ class ResolveChannels(unittest.TestCase):
 			self.assert_fails_closed(resolution, "when")
 
 	def test_invalid_channel_entry_fails_closed(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "x"\n',
@@ -315,7 +357,10 @@ class ResolveChannels(unittest.TestCase):
 	def test_unreadable_config_fails_closed(self):
 		if hasattr(os, "geteuid") and os.geteuid() == 0:
 			self.skipTest("permission checks are bypassed as root")
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			gdir = os.path.join(home, ".config", "project-sync")
 			os.makedirs(gdir)
 			path = os.path.join(gdir, "config.toml")
@@ -336,7 +381,10 @@ class WorktreeBoundary(unittest.TestCase):
 		return {c["purpose"].lower(): c for c in resolution.channels}
 
 	def test_clone_stops_at_worktree_root(self):
-		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+		with (
+			tempfile.TemporaryDirectory() as top,
+			tempfile.TemporaryDirectory() as home,
+		):
 			write(os.path.join(top, ".project-sync.toml"), PARENT_CONFIG)
 			repo = os.path.join(top, "repo")
 			os.makedirs(os.path.join(repo, ".git"))
@@ -356,7 +404,10 @@ class WorktreeBoundary(unittest.TestCase):
 	def test_linked_worktree_resolves_like_a_clone(self):
 		# A linked worktree has a .git *file*, not a directory; the boundary
 		# must treat both shapes identically.
-		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+		with (
+			tempfile.TemporaryDirectory() as top,
+			tempfile.TemporaryDirectory() as home,
+		):
 			write(os.path.join(top, ".project-sync.toml"), PARENT_CONFIG)
 			wt = os.path.join(top, "wt")
 			os.makedirs(wt)
@@ -375,7 +426,10 @@ class WorktreeBoundary(unittest.TestCase):
 			self.assertEqual(resolution.worktree_root, os.path.realpath(wt))
 
 	def test_parent_inheritance_requires_explicit_opt_in(self):
-		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+		with (
+			tempfile.TemporaryDirectory() as top,
+			tempfile.TemporaryDirectory() as home,
+		):
 			write(
 				os.path.join(top, ".project-sync.toml"),
 				PARENT_CONFIG + '\n[project]\nname = "parent-name"\n',
@@ -410,7 +464,10 @@ class WorktreeBoundary(unittest.TestCase):
 
 	@unittest.skipUnless(shutil.which("git"), "git not available")
 	def test_real_linked_worktree_matches_clone_boundary(self):
-		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+		with (
+			tempfile.TemporaryDirectory() as top,
+			tempfile.TemporaryDirectory() as home,
+		):
 			repo = os.path.join(top, "repo")
 			os.makedirs(repo)
 
@@ -467,7 +524,10 @@ class WorktreeBoundary(unittest.TestCase):
 
 class ProjectBindingConfig(unittest.TestCase):
 	def test_explicit_binding_is_reported(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			path = os.path.join(cwd, ".project-sync.toml")
 			write(path, '[project]\nname = "oss-sync"\nlinear = "OSS"\n')
 			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
@@ -493,7 +553,10 @@ class ProjectBindingConfig(unittest.TestCase):
 				self.assertTrue(resolution.errors)
 
 	def test_binding_appears_in_session_text(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"), '[project]\nlinear = "OSS"\n'
 			)
@@ -597,7 +660,10 @@ class HookBoundary(unittest.TestCase):
 		)
 
 	def test_startup_injects_session_context(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			result = self.run_hook(
 				stdin_text=self.session_input(cwd), cwd=cwd, home=home
 			)
@@ -608,7 +674,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertIn("Project-sync session reminder", context)
 
 	def test_compact_source_stays_silent(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			result = self.run_hook(
 				stdin_text=self.session_input(cwd, source="compact"), cwd=cwd, home=home
 			)
@@ -616,7 +685,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertEqual(result.stdout, "")
 
 	def test_damaged_config_injects_nothing(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(os.path.join(cwd, ".project-sync.toml"), "[[channel]\n")
 			result = self.run_hook(
 				stdin_text=self.session_input(cwd), cwd=cwd, home=home
@@ -627,7 +699,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertIn(".project-sync.toml", result.stderr)
 
 	def test_all_channels_disabled_injects_nothing(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "task plans"\nenabled = false\n\n'
@@ -641,7 +716,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertEqual(result.stderr, "")
 
 	def test_check_mode_fails_for_damaged_config(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(os.path.join(cwd, ".project-sync.toml"), "[[channel]\n")
 			result = self.run_hook("--check", cwd=cwd, home=home)
 			self.assertEqual(result.returncode, 1)
@@ -649,14 +727,20 @@ class HookBoundary(unittest.TestCase):
 			self.assertIn("project-sync:", result.stderr)
 
 	def test_check_mode_ok_without_config(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			result = self.run_hook("--check", cwd=cwd, home=home)
 			self.assertEqual(result.returncode, 0)
 			self.assertEqual(result.stderr, "")
 			self.assertIn("task plans -> Linear", result.stdout)
 
 	def test_check_mode_reports_all_disabled(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "task plans"\nenabled = false\n\n'
@@ -682,12 +766,18 @@ class HookBoundary(unittest.TestCase):
 		return context
 
 	def test_fork_source_injects_session_context(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			context = self.hook_context(cwd, home, source="fork")
 			self.assertIn("Project-sync session reminder", context)
 
 	def test_effective_defaults_without_config(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			rc, payload, stderr = self.effective(cwd, home)
 			self.assertEqual(rc, 0)
 			self.assertEqual(stderr, "")
@@ -711,7 +801,10 @@ class HookBoundary(unittest.TestCase):
 	def test_effective_matches_hook_text_under_partial_config(self):
 		# A config that overrides one default and adds one channel: the hook
 		# reminder and the --effective JSON must describe the same channels.
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "task plans"\ntool = "Asana"\n'
@@ -737,7 +830,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertNotIn("Notion", after_text)
 
 	def test_disabled_destination_not_reauthorized_by_text(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(
 				os.path.join(cwd, ".project-sync.toml"),
 				'[[channel]]\npurpose = "decisions / notes"\nenabled = false\n',
@@ -755,7 +851,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertEqual(payload["disabled"], ["decisions / notes"])
 
 	def test_effective_fails_closed_for_damaged_config(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			write(os.path.join(cwd, ".project-sync.toml"), "[[channel]\n")
 			rc, payload, stderr = self.effective(cwd, home)
 			self.assertEqual(rc, 1)
@@ -768,7 +867,10 @@ class HookBoundary(unittest.TestCase):
 			self.assertIn("project-sync:", stderr)
 
 	def test_effective_reports_project_binding_and_sources(self):
-		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
 			repo = os.path.join(cwd, "repo")
 			os.makedirs(os.path.join(repo, ".git"))
 			path = os.path.join(repo, ".project-sync.toml")
@@ -788,6 +890,192 @@ class HookBoundary(unittest.TestCase):
 			if not isinstance(sources, dict):
 				self.fail("sources is not an object")
 			self.assertEqual(sources["project"], [os.path.realpath(path)])
+
+	# --- raw stdin handling ------------------------------------------------
+
+	def test_invalid_json_stays_silent(self):
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
+			result = self.run_hook(stdin_text="not json {", cwd=cwd, home=home)
+			self.assertEqual(result.returncode, 0)
+			self.assertEqual(result.stdout, "")
+			self.assertEqual(result.stderr, "")
+
+	def test_empty_stdin_stays_silent(self):
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
+			result = self.run_hook(stdin_text="", cwd=cwd, home=home)
+			self.assertEqual(result.returncode, 0)
+			self.assertEqual(result.stdout, "")
+			self.assertEqual(result.stderr, "")
+
+	def test_non_object_json_stays_silent(self):
+		for payload in (
+			"[]",
+			'[{"hook_event_name": "SessionStart"}]',
+			"42",
+			'"text"',
+			"null",
+			"true",
+		):
+			with (
+				self.subTest(payload=payload),
+				tempfile.TemporaryDirectory() as home,
+				tempfile.TemporaryDirectory() as cwd,
+			):
+				result = self.run_hook(stdin_text=payload, cwd=cwd, home=home)
+				self.assertEqual(result.returncode, 0)
+				self.assertEqual(result.stdout, "")
+				self.assertEqual(result.stderr, "")
+
+	# --- event filtering -----------------------------------------------------
+
+	def test_non_session_events_stay_silent(self):
+		for event in ("UserPromptSubmit", "PreToolUse", "Stop", "sessionstart"):
+			with (
+				self.subTest(event=event),
+				tempfile.TemporaryDirectory() as home,
+				tempfile.TemporaryDirectory() as cwd,
+			):
+				payload = json.dumps({"hook_event_name": event, "source": "startup"})
+				result = self.run_hook(stdin_text=payload, cwd=cwd, home=home)
+				self.assertEqual(result.returncode, 0)
+				self.assertEqual(result.stdout, "")
+				self.assertEqual(result.stderr, "")
+
+	def test_missing_or_mistyped_event_stays_silent(self):
+		for payload in (
+			json.dumps({"source": "startup"}),
+			json.dumps({"hook_event_name": 42, "source": "startup"}),
+			json.dumps({"hook_event_name": ["SessionStart"], "source": "startup"}),
+			json.dumps({"hook_event_name": "", "source": "startup"}),
+		):
+			with (
+				self.subTest(payload=payload),
+				tempfile.TemporaryDirectory() as home,
+				tempfile.TemporaryDirectory() as cwd,
+			):
+				result = self.run_hook(stdin_text=payload, cwd=cwd, home=home)
+				self.assertEqual(result.returncode, 0)
+				self.assertEqual(result.stdout, "")
+				self.assertEqual(result.stderr, "")
+
+	def test_missing_or_unknown_source_stays_silent(self):
+		for payload in (
+			json.dumps({"hook_event_name": "SessionStart"}),
+			json.dumps({"hook_event_name": "SessionStart", "source": "bogus"}),
+			json.dumps({"hook_event_name": "SessionStart", "source": 42}),
+		):
+			with (
+				self.subTest(payload=payload),
+				tempfile.TemporaryDirectory() as home,
+				tempfile.TemporaryDirectory() as cwd,
+			):
+				result = self.run_hook(stdin_text=payload, cwd=cwd, home=home)
+				self.assertEqual(result.returncode, 0)
+				self.assertEqual(result.stdout, "")
+				self.assertEqual(result.stderr, "")
+
+	# --- output protocol -------------------------------------------------------
+
+	def test_session_start_output_matches_protocol(self):
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
+			result = self.run_hook(
+				stdin_text=self.session_input(cwd), cwd=cwd, home=home
+			)
+			self.assertEqual(result.returncode, 0)
+			self.assertEqual(result.stderr, "")
+			# stdout carries exactly one JSON document and nothing else.
+			self.assertEqual(result.stdout.count("\n"), 1)
+			payload = json.loads(result.stdout)
+			self.assertEqual(set(payload), {"hookSpecificOutput"})
+			specific = payload["hookSpecificOutput"]
+			self.assertEqual(set(specific), {"hookEventName", "additionalContext"})
+			self.assertEqual(specific["hookEventName"], "SessionStart")
+			context = specific["additionalContext"]
+			if not isinstance(context, str):
+				self.fail("additionalContext is not a string")
+			self.assertTrue(context.strip())
+
+	def test_resume_and_clear_sources_inject(self):
+		for source in ("resume", "clear"):
+			with (
+				self.subTest(source=source),
+				tempfile.TemporaryDirectory() as home,
+				tempfile.TemporaryDirectory() as cwd,
+			):
+				context = self.hook_context(cwd, home, source=source)
+				self.assertIn("Project-sync session reminder", context)
+
+	# --- error diagnostics never touch stdout ----------------------------------
+
+	def test_damaged_global_config_diagnostics_stay_on_stderr(self):
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
+			gdir = os.path.join(home, ".config", "project-sync")
+			os.makedirs(gdir)
+			write(os.path.join(gdir, "config.toml"), "[[channel]\n")
+			result = self.run_hook(
+				stdin_text=self.session_input(cwd), cwd=cwd, home=home
+			)
+			self.assertEqual(result.returncode, 0)
+			self.assertEqual(result.stdout, "")
+			self.assertIn("project-sync:", result.stderr)
+			self.assertIn("config.toml", result.stderr)
+
+	def test_unreadable_config_diagnostics_stay_on_stderr(self):
+		if hasattr(os, "geteuid") and os.geteuid() == 0:
+			self.skipTest("permission checks are bypassed as root")
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
+			path = os.path.join(cwd, ".project-sync.toml")
+			write(path, '[[channel]]\npurpose = "x"\ntool = "y"\n')
+			os.chmod(path, 0o000)
+			try:
+				hook = self.run_hook(
+					stdin_text=self.session_input(cwd), cwd=cwd, home=home
+				)
+				check = self.run_hook("--check", cwd=cwd, home=home)
+				effective = self.run_hook("--effective", cwd=cwd, home=home)
+			finally:
+				os.chmod(path, 0o600)
+			# Hook mode: fail closed with stdout protocol untouched.
+			self.assertEqual(hook.returncode, 0)
+			self.assertEqual(hook.stdout, "")
+			self.assertIn("permission", hook.stderr)
+			# --check mode: non-zero exit, human diagnostic on stderr only.
+			self.assertEqual(check.returncode, 1)
+			self.assertEqual(check.stdout, "")
+			self.assertIn("permission", check.stderr)
+			# --effective mode: stdout stays a valid JSON envelope (ok=false).
+			self.assertEqual(effective.returncode, 1)
+			payload = json.loads(effective.stdout)
+			self.assertIs(payload["ok"], False)
+			self.assertEqual(payload["channels"], [])
+			self.assertIn("permission", effective.stderr)
+
+	def test_unknown_arguments_exit_with_usage(self):
+		with (
+			tempfile.TemporaryDirectory() as home,
+			tempfile.TemporaryDirectory() as cwd,
+		):
+			for args in (("--bogus",), ("--check", "a", "b")):
+				with self.subTest(args=args):
+					result = self.run_hook(*args, cwd=cwd, home=home)
+					self.assertEqual(result.returncode, 2)
+					self.assertEqual(result.stdout, "")
+					self.assertIn("usage:", result.stderr)
 
 
 if __name__ == "__main__":
