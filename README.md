@@ -32,8 +32,8 @@ Behavior is driven by **sync channels** — each maps a `purpose` to a `tool` an
 the phase(s) it applies to (`before` / `after`). Config is layered, later
 sources overriding earlier ones by `purpose` (case-insensitive):
 
-1. **Built-in default:** `task plans → Linear` and `decisions / notes → Notion`,
-   both `before` and `after`.
+1. **Built-in default:** `task plans → Linear` (`before` + `after`) and
+   `decisions / notes → Notion` (`before` only — Notion write-back is opt-in).
 2. **Global:** `$XDG_CONFIG_HOME/project-sync/config.toml`
    (default `~/.config/project-sync/config.toml`).
 3. **Per-project:** nearest `.project-sync.toml` walking up from the cwd.
@@ -49,7 +49,29 @@ when    = ["before", "after"]
 purpose = "experiment results/logs"
 tool    = "Trackio"
 when    = ["after"]            # write-back only
+
+[[channel]]
+purpose = "decisions / notes"
+enabled = false                # explicitly disable a channel (e.g. a default)
 ```
+
+Configuration rules:
+
+- `enabled = false` disables a channel at any layer, including built-in
+  defaults; a disabled entry needs only its `purpose`.
+- `when` must be a non-empty array of `"before"` / `"after"`. An omitted
+  `when` defaults to both phases, but an empty or mistyped `when` is an
+  error — never a silent fallback.
+- `purpose` and `tool` must be non-empty strings (`tool` may be omitted only
+  when `enabled = false`).
+- Validation is **fail-closed**: a damaged or unreadable config file (broken
+  TOML, bad schema, missing permissions) makes the hook print a stderr
+  diagnostic and inject nothing, instead of silently restoring default
+  channels. Validate with
+  `python3 plugins/project-sync/hooks/project_sync_prompt.py --check`
+  (exits non-zero on invalid config).
+- A configured `after` phase only declares *when* to sync; it never grants
+  write access. User and project write restrictions always apply.
 
 `tool` names a *kind* of destination. The agent adapts to whatever MCP actually
 exists on the machine — the hook never hardcodes per-host MCP tool names. See
@@ -89,6 +111,14 @@ python3 -m unittest discover -s tests -v
 
 # Smoke-test the low-frequency SessionStart reminder
 echo '{"hook_event_name":"SessionStart","source":"startup"}' | python3 plugins/project-sync/hooks/project_sync_prompt.py
+
+# Validate the effective channel configuration for a directory (exit 1 on error)
+python3 plugins/project-sync/hooks/project_sync_prompt.py --check
+
+# Quality gates
+ruff check .
+ruff format --check .
+ty check .
 ```
 
 ## Layout
@@ -97,6 +127,7 @@ echo '{"hook_event_name":"SessionStart","source":"startup"}' | python3 plugins/p
 project_sync/
   .claude-plugin/marketplace.json        # marketplace manifest
   project-sync.example.toml              # example channel config
+  pyproject.toml                         # ty extra-search-path for the hook module
   plugins/project-sync/
     .claude-plugin/plugin.json
     hooks/
