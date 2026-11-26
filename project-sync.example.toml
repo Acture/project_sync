@@ -32,8 +32,21 @@
 # built-in default is: task plans -> Linear (before + after) and
 # decisions / notes -> Notion (before only; write-back is opt-in).
 #
+# Project config discovery walks up from the cwd and stops at the git worktree
+# root (a .git directory in a normal clone, a .git file in a linked worktree),
+# so both locate identically and unrelated parent directories never leak in.
+#
 # `when = ["after"]` declares a phase only; it never grants write access.
 # User and project write restrictions always apply.
+
+# Optional explicit project binding (honored from project config files only):
+#   [project]
+#   name = "oss-sync"       # display name
+#   linear = "OSS"          # Linear project name / ID — agents use it directly
+#                           # instead of broad-searching by repository name
+#   inherit_parent = true   # also merge .project-sync.toml files from parent
+#                           # directories above the git worktree root
+#                           # (default: false — discovery stops at the root)
 
 [[channel]]
 purpose = "task plans"

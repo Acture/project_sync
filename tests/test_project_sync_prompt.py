@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -128,21 +129,31 @@ class MergeChannels(unittest.TestCase):
 		self.assertIs(merged[0].get("enabled"), False)
 
 
-class FindConfigFile(unittest.TestCase):
+PARENT_CONFIG = (
+	'[[channel]]\npurpose = "task plans"\ntool = "ParentTool"\n'
+	'when = ["before", "after"]\n\n'
+	'[[channel]]\npurpose = "experiment results/logs"\ntool = "Trackio"\n'
+	'when = ["after"]\n'
+)
+
+
+class FindProjectConfigs(unittest.TestCase):
 	def test_walks_up_to_find_file(self):
 		with tempfile.TemporaryDirectory() as top:
 			child = os.path.join(top, "a", "b", "c")
 			os.makedirs(child)
 			target = os.path.join(top, ".project-sync.toml")
 			write(target, "")
-			found = h.find_config_file(child, ".project-sync.toml")
-			if found is None:
-				self.fail("project config was not found")
-			self.assertTrue(os.path.samefile(found, target))
+			found, boundary = h.find_project_configs(child)
+			self.assertIsNone(boundary)
+			self.assertEqual(len(found), 1)
+			self.assertTrue(os.path.samefile(found[0], target))
 
-	def test_returns_none_when_absent(self):
+	def test_returns_empty_when_absent(self):
 		with tempfile.TemporaryDirectory() as top:
-			self.assertIsNone(h.find_config_file(top, ".project-sync.toml"))
+			found, boundary = h.find_project_configs(top)
+			self.assertEqual(found, [])
+			self.assertIsNone(boundary)
 
 
 class ResolveChannels(unittest.TestCase):
@@ -317,6 +328,182 @@ class ResolveChannels(unittest.TestCase):
 			self.assert_fails_closed(resolution, "permission")
 
 
+# --- git / linked-worktree boundary --------------------------------------------
+
+
+class WorktreeBoundary(unittest.TestCase):
+	def by_purpose(self, resolution: h.Resolution) -> dict[str, h.Channel]:
+		return {c["purpose"].lower(): c for c in resolution.channels}
+
+	def test_clone_stops_at_worktree_root(self):
+		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+			write(os.path.join(top, ".project-sync.toml"), PARENT_CONFIG)
+			repo = os.path.join(top, "repo")
+			os.makedirs(os.path.join(repo, ".git"))
+			write(
+				os.path.join(repo, ".project-sync.toml"),
+				'[[channel]]\npurpose = "task plans"\ntool = "RepoTool"\n',
+			)
+			sub = os.path.join(repo, "a", "b")
+			os.makedirs(sub)
+			resolution = h.resolve_channels(cwd=sub, home=home, env={})
+			self.assertEqual(resolution.errors, [])
+			by_purpose = self.by_purpose(resolution)
+			self.assertEqual(by_purpose["task plans"]["tool"], "RepoTool")
+			self.assertNotIn("experiment results/logs", by_purpose)
+			self.assertEqual(resolution.worktree_root, os.path.realpath(repo))
+
+	def test_linked_worktree_resolves_like_a_clone(self):
+		# A linked worktree has a .git *file*, not a directory; the boundary
+		# must treat both shapes identically.
+		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+			write(os.path.join(top, ".project-sync.toml"), PARENT_CONFIG)
+			wt = os.path.join(top, "wt")
+			os.makedirs(wt)
+			write(os.path.join(wt, ".git"), "gitdir: /nonexistent/gitdir\n")
+			write(
+				os.path.join(wt, ".project-sync.toml"),
+				'[[channel]]\npurpose = "task plans"\ntool = "WtTool"\n',
+			)
+			sub = os.path.join(wt, "x")
+			os.makedirs(sub)
+			resolution = h.resolve_channels(cwd=sub, home=home, env={})
+			self.assertEqual(resolution.errors, [])
+			by_purpose = self.by_purpose(resolution)
+			self.assertEqual(by_purpose["task plans"]["tool"], "WtTool")
+			self.assertNotIn("experiment results/logs", by_purpose)
+			self.assertEqual(resolution.worktree_root, os.path.realpath(wt))
+
+	def test_parent_inheritance_requires_explicit_opt_in(self):
+		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+			write(
+				os.path.join(top, ".project-sync.toml"),
+				PARENT_CONFIG + '\n[project]\nname = "parent-name"\n',
+			)
+			repo = os.path.join(top, "repo")
+			os.makedirs(os.path.join(repo, ".git"))
+			write(
+				os.path.join(repo, ".project-sync.toml"),
+				'[project]\ninherit_parent = true\nlinear = "OSS"\n\n'
+				'[[channel]]\npurpose = "task plans"\ntool = "RepoTool"\n',
+			)
+			sub = os.path.join(repo, "sub")
+			os.makedirs(sub)
+			resolution = h.resolve_channels(cwd=sub, home=home, env={})
+			self.assertEqual(resolution.errors, [])
+			by_purpose = self.by_purpose(resolution)
+			# The repo layer wins over the inherited parent layer.
+			self.assertEqual(by_purpose["task plans"]["tool"], "RepoTool")
+			# A parent-only purpose is appended.
+			self.assertEqual(by_purpose["experiment results/logs"]["tool"], "Trackio")
+			# Project bindings merge across layers; nearest file wins per field.
+			self.assertEqual(resolution.project.name, "parent-name")
+			self.assertEqual(resolution.project.linear, "OSS")
+			self.assertTrue(resolution.project.inherit_parent)
+			self.assertEqual(
+				[
+					os.path.basename(os.path.dirname(p))
+					for p in resolution.project_paths
+				],
+				["repo", os.path.basename(top)],
+			)
+
+	@unittest.skipUnless(shutil.which("git"), "git not available")
+	def test_real_linked_worktree_matches_clone_boundary(self):
+		with tempfile.TemporaryDirectory() as top, tempfile.TemporaryDirectory() as home:
+			repo = os.path.join(top, "repo")
+			os.makedirs(repo)
+
+			def git(*args: str) -> None:
+				subprocess.run(
+					["git", *args],
+					cwd=repo,
+					check=True,
+					capture_output=True,
+					text=True,
+					timeout=30,
+				)
+
+			git("init", "-q")
+			write(os.path.join(repo, "tracked.txt"), "x\n")
+			git("add", "tracked.txt")
+			git(
+				"-c",
+				"user.name=t",
+				"-c",
+				"user.email=t@example.com",
+				"commit",
+				"-qm",
+				"init",
+			)
+			write(os.path.join(top, ".project-sync.toml"), PARENT_CONFIG)
+			write(
+				os.path.join(repo, ".project-sync.toml"),
+				'[[channel]]\npurpose = "task plans"\ntool = "RepoTool"\n',
+			)
+			wt = os.path.join(top, "wt")
+			git("worktree", "add", "-q", wt)
+			write(
+				os.path.join(wt, ".project-sync.toml"),
+				'[[channel]]\npurpose = "task plans"\ntool = "WtTool"\n',
+			)
+
+			clone_res = h.resolve_channels(cwd=repo, home=home, env={})
+			wt_res = h.resolve_channels(cwd=wt, home=home, env={})
+			self.assertEqual(clone_res.errors, [])
+			self.assertEqual(wt_res.errors, [])
+			self.assertEqual(
+				self.by_purpose(clone_res)["task plans"]["tool"], "RepoTool"
+			)
+			self.assertEqual(self.by_purpose(wt_res)["task plans"]["tool"], "WtTool")
+			self.assertNotIn("experiment results/logs", self.by_purpose(clone_res))
+			self.assertNotIn("experiment results/logs", self.by_purpose(wt_res))
+			self.assertEqual(clone_res.worktree_root, os.path.realpath(repo))
+			self.assertEqual(wt_res.worktree_root, os.path.realpath(wt))
+
+
+# --- explicit project binding ----------------------------------------------------
+
+
+class ProjectBindingConfig(unittest.TestCase):
+	def test_explicit_binding_is_reported(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			path = os.path.join(cwd, ".project-sync.toml")
+			write(path, '[project]\nname = "oss-sync"\nlinear = "OSS"\n')
+			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
+			self.assertEqual(resolution.errors, [])
+			self.assertEqual(resolution.project.name, "oss-sync")
+			self.assertEqual(resolution.project.linear, "OSS")
+			self.assertEqual(resolution.project.source, os.path.realpath(path))
+
+	def test_invalid_project_table_fails_closed(self):
+		for body in (
+			'[project]\nname = ""\n',
+			'[project]\ninherit_parent = "yes"\n',
+			"project = 1\n",
+		):
+			with (
+				self.subTest(body=body),
+				tempfile.TemporaryDirectory() as home,
+				tempfile.TemporaryDirectory() as cwd,
+			):
+				write(os.path.join(cwd, ".project-sync.toml"), body)
+				resolution = h.resolve_channels(cwd=cwd, home=home, env={})
+				self.assertEqual(resolution.channels, [])
+				self.assertTrue(resolution.errors)
+
+	def test_binding_appears_in_session_text(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			write(
+				os.path.join(cwd, ".project-sync.toml"), '[project]\nlinear = "OSS"\n'
+			)
+			resolution = h.resolve_channels(cwd=cwd, home=home, env={})
+			text = h.build_session_text(resolution.channels, resolution.project)
+			self.assertIn("OSS", text)
+			self.assertIn("instead of searching by repository name", text)
+			self.assertNotIn("Infer the project from cwd", text)
+
+
 # --- text builders -------------------------------------------------------------
 
 
@@ -356,7 +543,7 @@ class BuildSessionText(unittest.TestCase):
 
 class ShouldEmit(unittest.TestCase):
 	def test_allows_low_frequency_session_sources(self):
-		for source in ("startup", "resume", "clear"):
+		for source in ("startup", "resume", "clear", "fork"):
 			with self.subTest(source=source):
 				self.assertTrue(h.should_emit("SessionStart", source))
 
@@ -375,7 +562,9 @@ class HookManifest(unittest.TestCase):
 		with open(path, encoding="utf-8") as f:
 			hooks = json.load(f)["hooks"]
 		self.assertEqual(set(hooks), {"SessionStart"})
-		self.assertEqual(hooks["SessionStart"][0]["matcher"], "startup|resume|clear")
+		self.assertEqual(
+			hooks["SessionStart"][0]["matcher"], "startup|resume|clear|fork"
+		)
 
 
 # --- hook process boundary -----------------------------------------------------
@@ -476,6 +665,129 @@ class HookBoundary(unittest.TestCase):
 			result = self.run_hook("--check", cwd=cwd, home=home)
 			self.assertEqual(result.returncode, 0)
 			self.assertIn("disabled", result.stdout)
+
+	def effective(self, cwd: str, home: str) -> tuple[int, dict[str, object], str]:
+		result = self.run_hook("--effective", cwd=cwd, home=home)
+		return result.returncode, json.loads(result.stdout), result.stderr
+
+	def hook_context(self, cwd: str, home: str, source: str = "startup") -> str:
+		result = self.run_hook(
+			stdin_text=self.session_input(cwd, source=source), cwd=cwd, home=home
+		)
+		self.assertEqual(result.returncode, 0)
+		payload = json.loads(result.stdout)
+		context = payload["hookSpecificOutput"]["additionalContext"]
+		if not isinstance(context, str):
+			self.fail("additionalContext is not a string")
+		return context
+
+	def test_fork_source_injects_session_context(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			context = self.hook_context(cwd, home, source="fork")
+			self.assertIn("Project-sync session reminder", context)
+
+	def test_effective_defaults_without_config(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			rc, payload, stderr = self.effective(cwd, home)
+			self.assertEqual(rc, 0)
+			self.assertEqual(stderr, "")
+			self.assertIs(payload["ok"], True)
+			channels = payload["channels"]
+			if not isinstance(channels, list):
+				self.fail("channels is not a list")
+			self.assertEqual(
+				[c["purpose"] for c in channels],
+				["task plans", "decisions / notes"],
+			)
+			sources = payload["sources"]
+			if not isinstance(sources, dict):
+				self.fail("sources is not an object")
+			global_source = sources["global"]
+			if not isinstance(global_source, dict):
+				self.fail("global source is not an object")
+			self.assertIs(global_source["exists"], False)
+			self.assertEqual(sources["project"], [])
+
+	def test_effective_matches_hook_text_under_partial_config(self):
+		# A config that overrides one default and adds one channel: the hook
+		# reminder and the --effective JSON must describe the same channels.
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			write(
+				os.path.join(cwd, ".project-sync.toml"),
+				'[[channel]]\npurpose = "task plans"\ntool = "Asana"\n'
+				'when = ["before"]\n\n'
+				'[[channel]]\npurpose = "experiment results/logs"\ntool = "Trackio"\n'
+				'when = ["after"]\n',
+			)
+			context = self.hook_context(cwd, home)
+			rc, payload, _ = self.effective(cwd, home)
+			self.assertEqual(rc, 0)
+			before_text, after_text = context.split("Before finishing", maxsplit=1)
+			channels = payload["channels"]
+			if not isinstance(channels, list):
+				self.fail("channels is not a list")
+			for channel in channels:
+				segment = f"{channel['purpose']} in {channel['tool']}"
+				if "before" in channel["when"]:
+					self.assertIn(segment, before_text)
+				if "after" in channel["when"]:
+					self.assertIn(segment, after_text)
+			# The untouched default stays before-only in both views.
+			self.assertIn("decisions / notes in Notion", before_text)
+			self.assertNotIn("Notion", after_text)
+
+	def test_disabled_destination_not_reauthorized_by_text(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			write(
+				os.path.join(cwd, ".project-sync.toml"),
+				'[[channel]]\npurpose = "decisions / notes"\nenabled = false\n',
+			)
+			context = self.hook_context(cwd, home)
+			self.assertNotIn("Notion", context)
+			self.assertIn("task plans", context)
+			self.assertIn("never grant write access", context)
+			rc, payload, _ = self.effective(cwd, home)
+			self.assertEqual(rc, 0)
+			channels = payload["channels"]
+			if not isinstance(channels, list):
+				self.fail("channels is not a list")
+			self.assertEqual([c["purpose"] for c in channels], ["task plans"])
+			self.assertEqual(payload["disabled"], ["decisions / notes"])
+
+	def test_effective_fails_closed_for_damaged_config(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			write(os.path.join(cwd, ".project-sync.toml"), "[[channel]\n")
+			rc, payload, stderr = self.effective(cwd, home)
+			self.assertEqual(rc, 1)
+			self.assertIs(payload["ok"], False)
+			self.assertEqual(payload["channels"], [])
+			errors = payload["errors"]
+			if not isinstance(errors, list):
+				self.fail("errors is not a list")
+			self.assertTrue(errors)
+			self.assertIn("project-sync:", stderr)
+
+	def test_effective_reports_project_binding_and_sources(self):
+		with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cwd:
+			repo = os.path.join(cwd, "repo")
+			os.makedirs(os.path.join(repo, ".git"))
+			path = os.path.join(repo, ".project-sync.toml")
+			write(path, '[project]\nname = "oss-sync"\nlinear = "OSS"\n')
+			sub = os.path.join(repo, "sub")
+			os.makedirs(sub)
+			rc, payload, _ = self.effective(sub, home)
+			self.assertEqual(rc, 0)
+			project = payload["project"]
+			if not isinstance(project, dict):
+				self.fail("project is not an object")
+			self.assertEqual(project["name"], "oss-sync")
+			self.assertEqual(project["linear"], "OSS")
+			self.assertEqual(project["source"], os.path.realpath(path))
+			self.assertEqual(payload["worktree_root"], os.path.realpath(repo))
+			sources = payload["sources"]
+			if not isinstance(sources, dict):
+				self.fail("sources is not an object")
+			self.assertEqual(sources["project"], [os.path.realpath(path)])
 
 
 if __name__ == "__main__":

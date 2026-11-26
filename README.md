@@ -13,7 +13,7 @@ The plugin ships two complementary pieces:
 
 | Piece | Mechanism | Behavior |
 |-------|-----------|----------|
-| **Hook** (`SessionStart`) | Fires on `startup`, `resume`, and `clear`; never on per-prompt events or automatic compaction | Injects one compact session reminder covering both the initial check and eventual write-back. |
+| **Hook** (`SessionStart`) | Fires on `startup`, `resume`, `clear`, and `fork`; never on per-prompt events or automatic compaction | Injects one compact session reminder covering both the initial check and eventual write-back. |
 | **Skill** (`project-sync`) | **Model-invoked** when the task matches | The per-task *before/after* playbook — loaded when the model judges it's starting or finishing a unit of work. |
 
 **Why this split?** Starting and finishing a meaningful unit of work are semantic
@@ -36,7 +36,11 @@ sources overriding earlier ones by `purpose` (case-insensitive):
    `decisions / notes → Notion` (`before` only — Notion write-back is opt-in).
 2. **Global:** `$XDG_CONFIG_HOME/project-sync/config.toml`
    (default `~/.config/project-sync/config.toml`).
-3. **Per-project:** nearest `.project-sync.toml` walking up from the cwd.
+3. **Per-project:** `.project-sync.toml` files from the cwd up to the **git
+   worktree root** — the nearest directory holding a `.git` entry (a directory
+   in a normal clone, a file in a linked worktree, so both locate identically).
+   Configs in parent directories above that root are ignored unless the nearest
+   project config opts in with `[project] inherit_parent = true`.
 
 ```toml
 # .project-sync.toml — extends/overrides the global + default channels
@@ -72,6 +76,15 @@ Configuration rules:
   (exits non-zero on invalid config).
 - A configured `after` phase only declares *when* to sync; it never grants
   write access. User and project write restrictions always apply.
+- A project file may bind the project explicitly with a `[project]` table
+  (`name`, `linear`), so agents query the tracker directly instead of
+  broad-searching by repository name. `[project]` is honored from project
+  files only.
+- Hook and skill share one resolver:
+  `python3 plugins/project-sync/hooks/project_sync_prompt.py --effective`
+  prints the effective channels, config source paths, project binding, and
+  worktree boundary as JSON (exit 1 when invalid), so the skill never
+  re-derives the layering.
 
 `tool` names a *kind* of destination. The agent adapts to whatever MCP actually
 exists on the machine — the hook never hardcodes per-host MCP tool names. See
@@ -114,6 +127,9 @@ echo '{"hook_event_name":"SessionStart","source":"startup"}' | python3 plugins/p
 
 # Validate the effective channel configuration for a directory (exit 1 on error)
 python3 plugins/project-sync/hooks/project_sync_prompt.py --check
+
+# Print the effective configuration as JSON (channels, sources, project binding)
+python3 plugins/project-sync/hooks/project_sync_prompt.py --effective
 
 # Quality gates
 ruff check .

@@ -12,19 +12,28 @@ a decision — and so experiment results and status land where the team looks.
 ## Sync channels (configurable)
 
 Behavior is driven by **sync channels**, each a mapping of `purpose → tool → when`.
-Read the configuration before acting (first match wins, then merge):
+Do not compute the layered configuration yourself — read the same resolver the
+SessionStart hook uses:
 
-1. **Per-project:** nearest `.project-sync.toml` walking up from the cwd to the
-   repo / filesystem root.
-2. **Global:** `$XDG_CONFIG_HOME/project-sync/config.toml` (default
-   `~/.config/project-sync/config.toml`).
+```sh
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/project_sync_prompt.py" --effective
+```
 
-Per-project channels override global channels with the same `purpose`
-(case-insensitive) and add new ones. If no config exists, assume the default:
-`task plans → Linear` (before and after) and `decisions / notes → Notion`
-(before only — Notion write-back is opt-in via config).
+(Run from the project directory; in a source checkout of this repo the script is
+`plugins/project-sync/hooks/project_sync_prompt.py`.) It prints one JSON document:
 
-Each channel:
+- `ok` / `errors` — validation is **fail-closed**: when `ok` is false, tell the
+  user and do not guess destinations — never fall back to default channels.
+- `channels` — the effective channels after layering: built-in defaults ← global
+  `$XDG_CONFIG_HOME/project-sync/config.toml` ← project `.project-sync.toml`
+  files (override by `purpose`, case-insensitive). `disabled` lists purposes
+  turned off by config; never sync to them.
+- `sources` — the config file paths that were read, so you can point the user at
+  the exact file to edit.
+- `project` — the explicit project binding (below).
+- `worktree_root` — the git boundary used for config discovery (below).
+
+Channel fields:
 
 ```toml
 [[channel]]
@@ -43,34 +52,76 @@ enabled = false
 ```
 
 `when` must be a non-empty array of `"before"` / `"after"`; omit it for both
-phases. An empty or mistyped `when` is a config error, not a fallback. If the
-configuration is damaged or invalid (the hook prints a `project-sync:` stderr
-diagnostic; `project_sync_prompt.py --check` exits non-zero), tell the user and
-do not guess destinations — never fall back to default channels on your own.
+phases. An empty or mistyped `when` is a config error, not a fallback.
 
 `tool` names a *kind* of destination — adapt to whatever MCP actually exists on
 this machine (the Linear MCP tool names differ per host; infer, don't hardcode).
 
+## Project binding and config discovery
+
+A project config can bind the project explicitly, so tracker queries and writes
+go straight to the right project instead of broad-searching by repository name:
+
+```toml
+[project]
+name = "oss-sync"        # optional display name
+linear = "OSS"           # optional Linear project name / ID
+```
+
+When `project.linear` (or `project.name`) is set in the `--effective` output,
+use it directly.
+
+Project configs are discovered from the cwd upward and **stop at the git
+worktree root** — the nearest directory holding a `.git` entry (a directory in
+a normal clone, a file in a linked worktree, so both locate identically).
+Configs in parent directories above that root are ignored unless the nearest
+project config opts in:
+
+```toml
+[project]
+inherit_parent = true    # also merge .project-sync.toml files above the worktree root
+```
+
+The global config always lives at the XDG path and is unaffected by this
+boundary.
+
 ## Before acting
 
-1. Identify the project from cwd / git remote.
-2. Read the sync-channel config (above) to learn this project's channels.
-3. For each channel whose `when` includes `before`, consult that tool: check
-   active blockers, in-progress issues, recent decisions / constraints relevant
-   to the task at hand.
-4. Skip a channel if its tool has no usable MCP on this machine.
+1. Read the effective configuration (`--effective`, above). If `ok` is false,
+   report the errors and stop — do not guess destinations.
+2. For each enabled channel whose `when` includes `before` **and that is
+   relevant to the task at hand**, consult that tool: check active blockers,
+   in-progress issues, recent decisions / constraints. Do not poll every
+   configured system unconditionally — the session hook is a low-frequency
+   reminder, not a fan-out query.
+3. Skip a channel if its tool has no usable MCP on this machine, and say so.
 
-## After acting
+## After acting (incremental write-back)
 
-For each channel whose `when` includes `after`, reflect what changed:
-1. Update the corresponding tracker issue(s) status.
-2. Record decisions / milestones in the project notes.
-3. Log experiment results / metrics to the experiment channel.
-4. If follow-ups emerged, create tracker issues for them.
+Write back only what changed, and only to channels whose `when` includes
+`after`:
 
-A configured `after` phase only declares *when* to sync — it never grants write
-access. User and project write restrictions always apply; skip any write-back
-they forbid and say so instead.
+1. **The tracker owns execution state.** Update the status of the *existing*
+   issue for this work — search first (using the configured project binding),
+   never file a duplicate. Create an issue only for genuinely new follow-up
+   work.
+2. **The repository owns numbers and artifacts.** Metrics, logs, and figures
+   live in the repo; write back evidence links (commit, path, run URL), never
+   copies of result tables or running ledgers.
+3. **Notes write-back is opt-in.** A notes channel such as Notion is written
+   only when its config includes `"after"` — and even then the phase only
+   declares *when* to sync; user and project write restrictions still decide
+   *whether* you may write. Record decisions and milestones, not transcripts.
+4. **Report honestly.** If a channel's tool is unavailable or a write is
+   declined, say "not synced: \<channel\>" in your final message instead of
+   implying it happened.
+
+Completion flows one way: from finished work to the tracker. This plugin
+registers **no** `TaskCompleted` / `Stop` hook (only `SessionStart`), so
+nothing updates the tracker automatically when a task completes — do not claim
+otherwise. When the work has no tracker task object, the write-back path is
+manual: summarize the outcome in your final message, and create or update an
+issue only with explicit user approval.
 
 ## Scope
 
