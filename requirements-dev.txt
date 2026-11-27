@@ -1,0 +1,4 @@
+# Pinned quality-gate toolchain so fresh checkouts and CI agree.
+# Install: python3 -m pip install -r requirements-dev.txt
+ruff==0.6.7
+ty==0.0.91
