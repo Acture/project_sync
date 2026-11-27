@@ -9,12 +9,44 @@
 #   when = ["after"]           -> write back to this channel after changes
 #   when = ["before", "after"] -> both (default if `when` is omitted)
 #
+# Disable a channel explicitly (e.g. to turn off a built-in default):
+#   [[channel]]
+#   purpose = "decisions / notes"
+#   enabled = false            # tool/when are ignored on disabled entries
+#
+# Validation is fail-closed:
+#   - `when` must be a non-empty array of "before"/"after"; an empty or
+#     mistyped `when` is an error, never a silent fallback to both phases.
+#   - `purpose` and `tool` must be non-empty strings (`tool` may be omitted
+#     only when `enabled = false`).
+#   - A damaged or invalid file (broken TOML, unreadable file, bad schema)
+#     fails the whole configuration: the hook prints a stderr diagnostic and
+#     injects nothing instead of restoring default channels.
+#   Validate with: python3 plugins/project-sync/hooks/project_sync_prompt.py --check
+#
 # `tool` names a *kind* of destination; the agent adapts to whatever MCP exists
 # on the machine, so the exact tool names need not match per-host MCP namespaces.
 #
 # Per-project channels override global channels with the same `purpose`
 # (case-insensitive) and append any new purposes. With no config present, the
-# built-in default is: task plans -> Linear, decisions / notes -> Notion.
+# built-in default is: task plans -> Linear (before + after) and
+# decisions / notes -> Notion (before only; write-back is opt-in).
+#
+# Project config discovery walks up from the cwd and stops at the git worktree
+# root (a .git directory in a normal clone, a .git file in a linked worktree),
+# so both locate identically and unrelated parent directories never leak in.
+#
+# `when = ["after"]` declares a phase only; it never grants write access.
+# User and project write restrictions always apply.
+
+# Optional explicit project binding (honored from project config files only):
+#   [project]
+#   name = "oss-sync"       # display name
+#   linear = "OSS"          # Linear project name / ID — agents use it directly
+#                           # instead of broad-searching by repository name
+#   inherit_parent = true   # also merge .project-sync.toml files from parent
+#                           # directories above the git worktree root
+#                           # (default: false — discovery stops at the root)
 
 [[channel]]
 purpose = "task plans"
@@ -24,7 +56,7 @@ when = ["before", "after"]
 [[channel]]
 purpose = "decisions / notes"
 tool = "Notion"
-when = ["before", "after"]
+when = ["before", "after"]   # explicit opt-in to Notion write-back
 
 [[channel]]
 purpose = "experiment results/logs"
