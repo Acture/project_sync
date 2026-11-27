@@ -21,7 +21,8 @@ Read the configuration before acting (first match wins, then merge):
 
 Per-project channels override global channels with the same `purpose`
 (case-insensitive) and add new ones. If no config exists, assume the default:
-`task plans → Linear` and `decisions / notes → Notion`, both before and after.
+`task plans → Linear` (before and after) and `decisions / notes → Notion`
+(before only — Notion write-back is opt-in via config).
 
 Each channel:
 
@@ -31,6 +32,21 @@ purpose = "experiment results/logs"   # what you sync
 tool    = "Trackio"                    # which tool / MCP (or its equivalent)
 when    = ["after"]                    # "before" (check first), "after" (write back)
 ```
+
+A channel can be turned off explicitly at any layer, including a built-in
+default — only `purpose` is required on a disabled entry:
+
+```toml
+[[channel]]
+purpose = "decisions / notes"
+enabled = false
+```
+
+`when` must be a non-empty array of `"before"` / `"after"`; omit it for both
+phases. An empty or mistyped `when` is a config error, not a fallback. If the
+configuration is damaged or invalid (the hook prints a `project-sync:` stderr
+diagnostic; `project_sync_prompt.py --check` exits non-zero), tell the user and
+do not guess destinations — never fall back to default channels on your own.
 
 `tool` names a *kind* of destination — adapt to whatever MCP actually exists on
 this machine (the Linear MCP tool names differ per host; infer, don't hardcode).
@@ -51,6 +67,10 @@ For each channel whose `when` includes `after`, reflect what changed:
 2. Record decisions / milestones in the project notes.
 3. Log experiment results / metrics to the experiment channel.
 4. If follow-ups emerged, create tracker issues for them.
+
+A configured `after` phase only declares *when* to sync — it never grants write
+access. User and project write restrictions always apply; skip any write-back
+they forbid and say so instead.
 
 ## Scope
 
